@@ -1,0 +1,17 @@
+{
+  "name": "purescript-firkin",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "output"
+  ],
+  "dependencies": {
+    "purescript-incremental": "git://github.com/paf31/purescript-incremental.git#^0.2.1",
+    "purescript-dom": "^4.8.3",
+    "purescript-refs": "^3.0.0"
+  },
+  "devDependencies": {
+    "purescript-console": "^3.0.0"
+  }
+}
