@@ -1,4 +1,4 @@
-## Module Firkin
+## Module Purview
 
 #### `View`
 
@@ -97,12 +97,12 @@ must contain the same event listeners as those last attached, _by reference_.
 In practice, this means that the `View` passed into this function should be
 obtained using the `patch` function.
 
-See the implementation of the `tap` function for an example.
+See the implementation of the `run` function for an example.
 
-#### `tap`
+#### `run`
 
 ``` purescript
-tap :: forall model change eff. Patch model change => Element -> ((Change model -> Eff (dom :: DOM, ref :: REF | eff) Unit) -> Jet model -> Jet (View (dom :: DOM, ref :: REF | eff))) -> model -> Eff (dom :: DOM, ref :: REF | eff) Unit
+run :: forall model change eff. Patch model change => Element -> ((Change model -> Eff (dom :: DOM, ref :: REF | eff) Unit) -> Jet model -> Jet (View (dom :: DOM, ref :: REF | eff))) -> model -> Eff (dom :: DOM, ref :: REF | eff) Unit
 ```
 
 An example implementation of an application loop.

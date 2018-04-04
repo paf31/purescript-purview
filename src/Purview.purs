@@ -1,4 +1,4 @@
-module Firkin
+module Purview
   ( View
   , ViewChanges
   , text
@@ -7,7 +7,7 @@ module Firkin
   , element_
   , render
   , applyPatch
-  , tap
+  , run
   ) where
 
 import Prelude
@@ -165,7 +165,7 @@ render n (View v) = do
 -- | In practice, this means that the `View` passed into this function should be
 -- | obtained using the `patch` function.
 -- |
--- | See the implementation of the `tap` function for an example.
+-- | See the implementation of the `run` function for an example.
 applyPatch
   :: forall eff
    . Element
@@ -230,14 +230,14 @@ applyPatch e (View v) (ViewChanges vc) = do
 -- | Renders a `View` to the DOM under the given `Node`. The `View` can depend
 -- | on the current value of the `model`, which can change over time by the
 -- | application of `Change`s in event handlers.
-tap
+run
   :: forall model change eff
    . Patch model change
   => Element
   -> ((Change model -> Eff (dom :: DOM, ref :: REF | eff) Unit) -> Jet model -> Jet (View (dom :: DOM, ref :: REF | eff)))
   -> model
   -> Eff (dom :: DOM, ref :: REF | eff) Unit
-tap root view initialModel = do
+run root view initialModel = do
   modelRef <- newRef initialModel
   viewRef <- newRef Nothing
   document <- window >>= document

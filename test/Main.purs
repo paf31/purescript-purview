@@ -18,7 +18,7 @@ import Data.Maybe (Maybe(..))
 import Data.Monoid (mempty)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (unwrap, wrap)
-import Firkin (View, element, tap, text)
+import Purview (View, element, run, text)
 
 type Model = Atomic Int
 
@@ -38,5 +38,5 @@ main = do
   document <- map htmlDocumentToNonElementParentNode (window >>= document)
   container <- getElementById (wrap "container") document
   case container of
-    Just el -> tap el view (wrap 0)
+    Just el -> run el view (wrap 0)
     Nothing -> log "No 'container' node!"

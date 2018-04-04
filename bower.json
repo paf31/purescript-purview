@@ -1,5 +1,5 @@
 {
-  "name": "purescript-firkin",
+  "name": "purescript-purview",
   "ignore": [
     "**/.*",
     "node_modules",
