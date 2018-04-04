@@ -14,7 +14,8 @@
   "dependencies": {
     "purescript-incremental": "git://github.com/paf31/purescript-incremental.git#^1.1.0",
     "purescript-dom": "^4.8.3",
-    "purescript-refs": "^3.0.0"
+    "purescript-refs": "^3.0.0",
+    "purescript-dom-classy": "^2.2.0"
   },
   "devDependencies": {
     "purescript-console": "^3.0.0",

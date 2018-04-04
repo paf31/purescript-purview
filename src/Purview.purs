@@ -15,16 +15,16 @@ import Prelude
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Ref (REF, newRef, readRef, writeRef)
 import DOM (DOM)
-import DOM.Event.EventTarget (EventListener, addEventListener, removeEventListener)
+import DOM.Classy.Element (appendChild, insertBefore, removeAttribute, removeChild, setAttribute, setTextContent)
+import DOM.Classy.Event.EventTarget (EventListener, addEventListener, removeEventListener)
+import DOM.Classy.Node (toNode)
+import DOM.Classy.ParentNode (children, firstElementChild)
 import DOM.HTML (window)
 import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document)
 import DOM.Node.Document (createDocumentFragment, createElement, createTextNode)
-import DOM.Node.Element (removeAttribute, setAttribute)
 import DOM.Node.HTMLCollection (item)
-import DOM.Node.Node (appendChild, insertBefore, removeChild, setTextContent)
-import DOM.Node.ParentNode (children, firstElementChild)
-import DOM.Node.Types (Element, Node, documentFragmentToNode, elementToEventTarget, elementToNode, elementToParentNode, textToNode)
+import DOM.Node.Types (Element, Node, documentFragmentToNode, textToNode)
 import Data.Array ((!!))
 import Data.Foldable (sequence_, traverse_)
 import Data.Incremental (class Patch, Change, Jet, constant, fromChange, patch, toChange)
@@ -144,14 +144,14 @@ render
   -> View (dom :: DOM | eff)
   -> Eff (dom :: DOM | eff) Unit
 render n (View v) = do
-  doc <- window >>= document
-  ne <- createElement v.element (htmlDocumentToDocument doc)
-  tn <- createTextNode (unwrap v.text) (htmlDocumentToDocument doc)
-  _ <- appendChild (textToNode tn) (elementToNode ne)
+  doc <- window >>= document >>> map htmlDocumentToDocument
+  ne <- createElement v.element doc
+  tn <- createTextNode (unwrap v.text) doc
+  _ <- appendChild (textToNode tn) ne
   sequence_ (mapWithKey (\k s -> setAttribute k (unwrap s) ne) (unwrap v.attrs))
-  sequence_ (mapWithKey (\k h -> addEventListener (wrap k) (unwrap h) false (elementToEventTarget ne)) (unwrap v.handlers))
-  traverse_ (render (elementToNode ne)) (unwrap v.kids)
-  _ <- appendChild (elementToNode ne) n
+  sequence_ (mapWithKey (\k h -> addEventListener (wrap k) (unwrap h) false ne) (unwrap v.handlers))
+  traverse_ (render (toNode ne)) (unwrap v.kids)
+  _ <- appendChild ne n
   pure unit
 
 -- | Apply a set of `ViewChanges` to the DOM, under the given `Node`, which should
@@ -173,7 +173,7 @@ applyPatch
   -> ViewChanges (dom :: DOM | eff)
   -> Eff (dom :: DOM | eff) Unit
 applyPatch e (View v) (ViewChanges vc) = do
-    _ <- traverse_ (_ `setTextContent` (elementToNode e)) vc.text
+    _ <- traverse_ (_ `setTextContent` e) vc.text
     sequence_ (mapWithKey updateAttr (unwrap vc.attrs))
     sequence_ (mapWithKey updateHandler (unwrap vc.handlers))
     traverse_ updateChildren vc.kids
@@ -190,36 +190,36 @@ applyPatch e (View v) (ViewChanges vc) = do
       :: String
       -> MapChange (Atomic (EventListener (dom :: DOM | eff))) (Last (EventListener (dom :: DOM | eff)))
       -> Eff (dom :: DOM | eff) Unit
-    updateHandler k (Add h)    = do
-      addEventListener (wrap k) (unwrap h) false (elementToEventTarget e)
-    updateHandler k Remove     = do
+    updateHandler k (Add h) = do
+      addEventListener (wrap k) (unwrap h) false e
+    updateHandler k Remove = do
       lookup k (unwrap v.handlers) # traverse_ \h ->
-        removeEventListener (wrap k) (unwrap h) false (elementToEventTarget e)
+        removeEventListener (wrap k) (unwrap h) false e
     updateHandler k (Update dh) = dh # traverse_ \new -> do
       lookup k (unwrap v.handlers) # traverse_ \old ->
-        removeEventListener (wrap k) (unwrap old) false (elementToEventTarget e)
-      addEventListener (wrap k) new false (elementToEventTarget e)
+        removeEventListener (wrap k) (unwrap old) false e
+      addEventListener (wrap k) new false e
 
     updateChildren
       :: ArrayChange (View (dom :: DOM | eff)) (ViewChanges (dom :: DOM | eff))
       -> Eff (dom :: DOM | eff) Unit
     updateChildren (InsertAt i vw) = void do
-      doc <- window >>= document
-      cs <- children (elementToParentNode e)
+      doc <- window >>= document >>> map htmlDocumentToDocument
+      cs <- children e
       mc <- item i cs
-      newNode <- documentFragmentToNode <$> createDocumentFragment (htmlDocumentToDocument doc)
+      newNode <- documentFragmentToNode <$> createDocumentFragment doc
       render newNode vw
       case mc of
-        Just c -> insertBefore newNode (elementToNode c) (elementToNode e)
-        Nothing -> appendChild newNode (elementToNode e)
+        Just c -> insertBefore newNode c e
+        Nothing -> appendChild newNode e
     updateChildren (DeleteAt i) = do
-      cs <- children (elementToParentNode e)
+      cs <- children e
       mc <- item i cs
       case mc of
-        Just c -> void (removeChild (elementToNode c) (elementToNode e))
+        Just c -> void (removeChild c e)
         Nothing -> pure unit
     updateChildren (ModifyAt i dv) = do
-      cs <- children (elementToParentNode e)
+      cs <- children e
       mc <- item i cs
       mc # traverse_ \c ->
         unwrap v.kids !! i # traverse_ \cv ->
@@ -256,8 +256,8 @@ run root view initialModel = do
                 newView = patch currentView patches
             writeRef modelRef newModel
             writeRef viewRef (Just newView)
-            firstElementChild (elementToParentNode root) >>= traverse_ \e ->
+            firstElementChild root >>= traverse_ \e ->
               applyPatch e currentView patches
       updater m dm = fromChange (view onChange { position: m, velocity: dm }).velocity
   writeRef viewRef (Just initialView)
-  render (elementToNode root) initialView
+  render (toNode root) initialView
