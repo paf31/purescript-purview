@@ -6,6 +6,11 @@
     "bower_components",
     "output"
   ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/paf31/purescript-purview.git"
+  },
   "dependencies": {
     "purescript-incremental": "git://github.com/paf31/purescript-incremental.git#^1.1.0",
     "purescript-dom": "^4.8.3",
