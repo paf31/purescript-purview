@@ -99,10 +99,22 @@ obtained using the `patch` function.
 
 See the implementation of the `run` function for an example.
 
+#### `Component`
+
+``` purescript
+type Component model eff = Jet (Atomic (Change model -> Eff eff Unit)) -> Jet model -> Jet (View eff)
+```
+
+An example component type, used by the `run` function.
+
+A component takes a changing update function, and a changing `model`
+and returns a changing `View`. The update function receives a `Change` to
+the model and applies it.
+
 #### `run`
 
 ``` purescript
-run :: forall model change eff. Patch model change => Element -> ((Change model -> Eff (dom :: DOM, ref :: REF | eff) Unit) -> Jet model -> Jet (View (dom :: DOM, ref :: REF | eff))) -> model -> Eff (dom :: DOM, ref :: REF | eff) Unit
+run :: forall model change eff. Patch model change => Element -> Component model (dom :: DOM, ref :: REF | eff) -> model -> Eff (dom :: DOM, ref :: REF | eff) Unit
 ```
 
 An example implementation of an application loop.

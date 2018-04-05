@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "purescript-dom-classy": "^2.2.0",
-    "purescript-incremental-functions": "^1.1.2",
+    "purescript-incremental-functions": "^1.3.0",
     "purescript-refs": "^3.0.0"
   },
   "devDependencies": {

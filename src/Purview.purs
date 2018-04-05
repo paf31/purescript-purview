@@ -7,6 +7,7 @@ module Purview
   , element_
   , render
   , applyPatch
+  , Component
   , run
   ) where
 
@@ -25,7 +26,7 @@ import DOM.HTML.Window (document)
 import DOM.Node.Document (createDocumentFragment, createElement, createTextNode)
 import DOM.Node.HTMLCollection (item)
 import DOM.Node.Types (Element, Node, documentFragmentToNode, textToNode)
-import Data.Array ((!!))
+import Data.Array (foldM, (!!))
 import Data.Foldable (sequence_, traverse_)
 import Data.Incremental (class Patch, Change, Jet, constant, fromChange, patch, toChange)
 import Data.Incremental.Array (ArrayChange(..), IArray)
@@ -172,11 +173,11 @@ applyPatch
   -> View (dom :: DOM | eff)
   -> ViewChanges (dom :: DOM | eff)
   -> Eff (dom :: DOM | eff) Unit
-applyPatch e (View v) (ViewChanges vc) = do
+applyPatch e vv@(View v) (ViewChanges vc) = do
     _ <- traverse_ (_ `setTextContent` e) vc.text
     sequence_ (mapWithKey updateAttr (unwrap vc.attrs))
     sequence_ (mapWithKey updateHandler (unwrap vc.handlers))
-    traverse_ updateChildren vc.kids
+    void $ foldM updateChildren v.kids vc.kids
   where
     updateAttr
       :: String
@@ -201,29 +202,43 @@ applyPatch e (View v) (ViewChanges vc) = do
       addEventListener (wrap k) new false e
 
     updateChildren
-      :: ArrayChange (View (dom :: DOM | eff)) (ViewChanges (dom :: DOM | eff))
-      -> Eff (dom :: DOM | eff) Unit
-    updateChildren (InsertAt i vw) = void do
+      :: IArray (View (dom :: DOM | eff))
+      -> ArrayChange (View (dom :: DOM | eff)) (ViewChanges (dom :: DOM | eff))
+      -> Eff (dom :: DOM | eff) (IArray (View (dom :: DOM | eff)))
+    updateChildren kids ch@(InsertAt i vw) = do
       doc <- window >>= document >>> map htmlDocumentToDocument
       cs <- children e
       mc <- item i cs
       newNode <- documentFragmentToNode <$> createDocumentFragment doc
       render newNode vw
-      case mc of
+      _ <- case mc of
         Just c -> insertBefore newNode c e
         Nothing -> appendChild newNode e
-    updateChildren (DeleteAt i) = do
+      pure (patch kids [ch])
+    updateChildren kids ch@(DeleteAt i) = do
       cs <- children e
       mc <- item i cs
       case mc of
         Just c -> void (removeChild c e)
         Nothing -> pure unit
-    updateChildren (ModifyAt i dv) = do
+      pure (patch kids [ch])
+    updateChildren kids ch@(ModifyAt i dv) = do
       cs <- children e
       mc <- item i cs
       mc # traverse_ \c ->
-        unwrap v.kids !! i # traverse_ \cv ->
+        unwrap kids !! i # traverse_ \cv ->
           applyPatch c cv dv
+      pure (patch kids [ch])
+
+-- | An example component type, used by the `run` function.
+-- |
+-- | A component takes a changing update function, and a changing `model`
+-- | and returns a changing `View`. The update function receives a `Change` to
+-- | the model and applies it.
+type Component model eff
+   = Jet (Atomic (Change model -> Eff eff Unit))
+  -> Jet model
+  -> Jet (View eff)
 
 -- | An example implementation of an application loop.
 -- |
@@ -234,14 +249,14 @@ run
   :: forall model change eff
    . Patch model change
   => Element
-  -> ((Change model -> Eff (dom :: DOM, ref :: REF | eff) Unit) -> Jet model -> Jet (View (dom :: DOM, ref :: REF | eff)))
+  -> Component model (dom :: DOM, ref :: REF | eff)
   -> model
   -> Eff (dom :: DOM, ref :: REF | eff) Unit
-run root view initialModel = do
+run root component initialModel = do
   modelRef <- newRef initialModel
   viewRef <- newRef Nothing
   document <- window >>= document
-  let initialView = (view onChange (constant initialModel)).position
+  let initialView = (component (constant (wrap onChange)) (constant initialModel)).position
       onChange modelChange = do
         currentModel <- readRef modelRef
         currentView_ <- readRef viewRef
@@ -258,6 +273,6 @@ run root view initialModel = do
             writeRef viewRef (Just newView)
             firstElementChild root >>= traverse_ \e ->
               applyPatch e currentView patches
-      updater m dm = fromChange (view onChange { position: m, velocity: dm }).velocity
+      updater m dm = fromChange (component (constant (wrap onChange)) { position: m, velocity: dm }).velocity
   writeRef viewRef (Just initialView)
   render (toNode root) initialView
