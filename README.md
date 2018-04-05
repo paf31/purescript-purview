@@ -2,7 +2,7 @@
 
 A proof-of-concept UI library based on the incremental lambda calculus.
 
-- [Module Documentation](generated-docs/Firkin.md)
+- [Module Documentation](generated-docs/Purview.md)
 - [Counter Example](test/Main.purs)
 
 ## Motivation
