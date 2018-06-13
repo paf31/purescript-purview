@@ -6,38 +6,46 @@ module Purview
   , element
   , element_
   , render
-  , applyPatch
   , Component
   , run
   ) where
 
 import Prelude
 
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Ref (REF, newRef, readRef, writeRef)
-import DOM (DOM)
-import DOM.Classy.Element (appendChild, insertBefore, removeAttribute, removeChild, setAttribute, setTextContent)
-import DOM.Classy.Event.EventTarget (EventListener, addEventListener, removeEventListener)
-import DOM.Classy.Node (toNode)
-import DOM.Classy.ParentNode (children, firstElementChild)
-import DOM.HTML (window)
-import DOM.HTML.Types (htmlDocumentToDocument)
-import DOM.HTML.Window (document)
-import DOM.Node.Document (createDocumentFragment, createElement, createTextNode)
-import DOM.Node.HTMLCollection (item)
-import DOM.Node.Types (Element, Node, documentFragmentToNode, textToNode)
-import Data.Array (foldM, (!!))
-import Data.Foldable (sequence_, traverse_)
+import Data.Array as Array
+import Data.Foldable (for_)
+import Data.FoldableWithIndex (forWithIndex_)
 import Data.Incremental (class Patch, Change, Jet, constant, fromChange, patch, toChange)
 import Data.Incremental.Array (ArrayChange(..), IArray)
 import Data.Incremental.Eq (Atomic)
 import Data.Incremental.Map (MapChange(..), MapChanges, IMap)
-import Data.Map (empty, lookup, mapWithKey)
+import Data.Map (empty)
+import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Maybe.Last (Last)
-import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap, wrap)
+import Data.Traversable (for)
+import Data.TraversableWithIndex (forWithIndex)
+import Data.Tuple (Tuple(..))
+import Data.Tuple as Tuple
+import Effect (Effect)
+import Effect.Ref (Ref)
+import Effect.Ref (new, read, write) as Ref
+import Effect.Uncurried (EffectFn2, EffectFn3, runEffectFn2, runEffectFn3)
+import Foreign.Object (Object)
+import Foreign.Object as Object
 import Partial.Unsafe (unsafeCrashWith)
+import Web.DOM.Document (createElement, createTextNode)
+import Web.DOM.Element (Element)
+import Web.DOM.Element as Element
+import Web.DOM.Node (Node)
+import Web.DOM.Node as Node
+import Web.DOM.NodeList as NodeList
+import Web.DOM.Text as Text
+import Web.Event.EventTarget (EventListener, addEventListener, removeEventListener)
+import Web.HTML (window)
+import Web.HTML.HTMLDocument as HTMLDocument
+import Web.HTML.Window (document)
 
 -- | The (abstract) type of views.
 -- |
@@ -45,25 +53,25 @@ import Partial.Unsafe (unsafeCrashWith)
 -- | using the `text` and `element` functions.
 -- |
 -- | `View`s can be initially rendered to the DOM using the `render` function.
-newtype View eff = View
+newtype View = View
   { element  :: String
   , text     :: Atomic String
   , attrs    :: IMap String (Atomic String)
-  , handlers :: IMap String (Atomic (EventListener eff))
-  , kids     :: IArray (View eff)
+  , handlers :: IMap String (Atomic (Effect EventListener))
+  , kids     :: IArray View
   }
 
 -- | The (abstract) type of view updates.
 -- |
 -- | `View`s can be applied to the DOM using the `applyPatch` function.
-newtype ViewChanges eff = ViewChanges
+newtype ViewChanges = ViewChanges
   { text     :: Last String
   , attrs    :: MapChanges String (Atomic String) (Last String)
-  , handlers :: MapChanges String (Atomic (EventListener eff)) (Last (EventListener eff))
-  , kids     :: Array (ArrayChange (View eff) (ViewChanges eff))
+  , handlers :: MapChanges String (Atomic (Effect EventListener)) (Last (Effect EventListener))
+  , kids     :: Array (ArrayChange View ViewChanges)
   }
 
-instance semigroupViewChanges :: Semigroup (ViewChanges eff) where
+instance semigroupViewChanges :: Semigroup ViewChanges where
   append (ViewChanges a) (ViewChanges b) =
     ViewChanges
       { text:     a.text     <> b.text
@@ -72,10 +80,10 @@ instance semigroupViewChanges :: Semigroup (ViewChanges eff) where
       , kids:     a.kids     <> b.kids
       }
 
-instance monoidViewChanges :: Monoid (ViewChanges eff) where
+instance monoidViewChanges :: Monoid ViewChanges where
   mempty = ViewChanges { text: mempty, attrs: mempty, handlers: mempty, kids: mempty }
 
-instance patchView :: Patch (View eff) (ViewChanges eff) where
+instance patchView :: Patch View ViewChanges where
   patch (View v) (ViewChanges vc) =
     View v { text     = patch v.text     vc.text
            , attrs    = patch v.attrs    vc.attrs
@@ -84,13 +92,12 @@ instance patchView :: Patch (View eff) (ViewChanges eff) where
            }
 
 view_
-  :: forall eff
-   . String
+  :: String
   -> Jet (Atomic String)
   -> Jet (IMap String (Atomic String))
-  -> Jet (IMap String (Atomic (EventListener eff)))
-  -> Jet (IArray (View eff))
-  -> Jet (View eff)
+  -> Jet (IMap String (Atomic (Effect EventListener)))
+  -> Jet (IArray View)
+  -> Jet View
 view_ elName text_ attrs handlers kids =
   { position: View
       { element: elName
@@ -108,171 +115,194 @@ view_ elName text_ attrs handlers kids =
   }
 
 -- | Create a text node wrapped in an element with the specified name.
-textWith :: forall eff. String -> Jet (Atomic String) -> Jet (View eff)
+textWith :: String -> Jet (Atomic String) -> Jet View
 textWith elName s = view_ elName s (constant (wrap empty)) (constant (wrap empty)) (constant (wrap []))
 
 -- | Create a text node wrapped in a `<span>` element.
-text :: forall eff. Jet (Atomic String) -> Jet (View eff)
+text :: Jet (Atomic String) -> Jet View
 text = textWith "span"
 
 -- | Create an element with the given name, attributes, event listeners and
 -- | children.
 element
-  :: forall eff
-   . String
+  :: String
   -> Jet (IMap String (Atomic String))
-  -> Jet (IMap String (Atomic (EventListener eff)))
-  -> Jet (IArray (View eff))
-  -> Jet (View eff)
+  -> Jet (IMap String (Atomic (Effect EventListener)))
+  -> Jet (IArray View)
+  -> Jet View
 element elName = view_ elName (constant (wrap ""))
 
 -- | Create an element with no attributes or event handlers.
 element_
-  :: forall eff
-   . String
-  -> Jet (IArray (View eff))
-  -> Jet (View eff)
+  :: String
+  -> Jet (IArray View)
+  -> Jet View
 element_ elName kids = view_ elName (constant (wrap "")) (constant (wrap empty)) (constant (wrap empty)) kids
 
--- | Render a `View` to the DOM, under the given `Node`, and connect any
--- | event listeners.
--- |
--- | Once the initial `View` is rendered, the DOM can be updated using the
--- | `applyPatch` function.
+-- | Compile a View to DOM elements, returning the root element and an
+-- | effectful patching function.
 render
-  :: forall eff
-   . Node
-  -> View (dom :: DOM | eff)
-  -> Eff (dom :: DOM | eff) Unit
-render n (View v) = do
-  doc <- window >>= document >>> map htmlDocumentToDocument
-  ne <- createElement v.element doc
-  tn <- createTextNode (unwrap v.text) doc
-  _ <- appendChild (textToNode tn) ne
-  sequence_ (mapWithKey (\k s -> setAttribute k (unwrap s) ne) (unwrap v.attrs))
-  sequence_ (mapWithKey (\k h -> addEventListener (wrap k) (unwrap h) false ne) (unwrap v.handlers))
-  traverse_ (render (toNode ne)) (unwrap v.kids)
-  _ <- appendChild ne n
-  pure unit
+  ::  View
+  ->  Effect (Tuple Element (ViewChanges -> Effect Unit))
+render (View v) = do
+  doc <- HTMLDocument.toDocument <$> (window >>= document)
+  root <- createElement v.element doc
+  txt <- createTextNode (unwrap v.text) doc
+  _ <- Node.appendChild (Text.toNode txt) (Element.toNode root)
+  forWithIndex_ (unwrap v.attrs) \k s ->
+    Element.setAttribute k (unwrap s) root
+  listeners <- forWithIndex (unwrap v.handlers) \k mh -> do
+    h <- unwrap mh
+    addEventListener (wrap k) h false (Element.toEventTarget root)
+    pure h
+  childRenders <- for (unwrap v.kids) render
+  for_ childRenders \(Tuple ele _) ->
+    Node.appendChild (Element.toNode ele) (Element.toNode root)
+  listenersRef <- (Ref.new <<< Object.fromFoldable)
+    (Map.toUnfoldableUnordered listeners :: Array (Tuple String EventListener))
+  patchersRef <- Ref.new (map Tuple.snd childRenders)
+  pure (Tuple root (applyPatch root listenersRef patchersRef))
 
--- | Apply a set of `ViewChanges` to the DOM, under the given `Node`, which should
--- | be the same as the one initially passed to `render`.
+-- TODO: these obj* functions could be extracted to an independent package
+-- about mutable Objects.
+
+foreign import objDelete :: forall a. EffectFn2 String (Ref (Object a)) Unit
+
+foreign import objUpsert :: forall a. EffectFn3 String a (Ref (Object a)) Unit
+
+foreign import objUpdate :: forall a.
+  EffectFn3 String (a -> a) (Ref (Object a)) Unit
+
+-- | Apply a View patch to a DOM element, also given a reference to the
+-- | element's current event listeners and child patching functions.
 -- |
--- | The second argument is the _most-recently rendered_ `View`, i.e. the one which
--- | should correspond to the current state of the DOM.
--- |
--- | _Note_: in order to correctly remove event listeners, the `View` passed in
--- | must contain the same event listeners as those last attached, _by reference_.
--- | In practice, this means that the `View` passed into this function should be
--- | obtained using the `patch` function.
--- |
--- | See the implementation of the `run` function for an example.
-applyPatch
-  :: forall eff
-   . Element
-  -> View (dom :: DOM | eff)
-  -> ViewChanges (dom :: DOM | eff)
-  -> Eff (dom :: DOM | eff) Unit
-applyPatch e vv@(View v) (ViewChanges vc) = do
-    _ <- traverse_ (_ `setTextContent` e) vc.text
-    sequence_ (mapWithKey updateAttr (unwrap vc.attrs))
-    sequence_ (mapWithKey updateHandler (unwrap vc.handlers))
-    void $ foldM updateChildren v.kids vc.kids
+-- | Internal use only.
+applyPatch ::
+      Element
+  ->  Ref (Object EventListener)
+  -- TODO: An Array will not be efficient at large size for insert and
+  -- delete operations.
+  ->  Ref (Array (ViewChanges -> Effect Unit))
+  ->  ViewChanges
+  ->  Effect Unit
+applyPatch root listeners patchers (ViewChanges vc) = do
+
+  _ <- for_ vc.text (_ `Node.setTextContent` (Element.toNode root))
+  forWithIndex_ (unwrap vc.attrs) updateAttr
+  forWithIndex_ (unwrap vc.handlers) updateHandler
+  for_ vc.kids updateChildren
+
   where
-    updateAttr
-      :: String
-      -> MapChange (Atomic String) (Last String)
-      -> Eff (dom :: DOM | eff) Unit
-    updateAttr k (Add val) = setAttribute k (unwrap val) e
-    updateAttr k Remove = removeAttribute k e
-    updateAttr k (Update u) = traverse_ (\s -> setAttribute k s e) (unwrap u)
 
-    updateHandler
-      :: String
-      -> MapChange (Atomic (EventListener (dom :: DOM | eff))) (Last (EventListener (dom :: DOM | eff)))
-      -> Eff (dom :: DOM | eff) Unit
-    updateHandler k (Add h) = do
-      addEventListener (wrap k) (unwrap h) false e
-    updateHandler k Remove = do
-      lookup k (unwrap v.handlers) # traverse_ \h ->
-        removeEventListener (wrap k) (unwrap h) false e
-    updateHandler k (Update dh) = dh # traverse_ \new -> do
-      lookup k (unwrap v.handlers) # traverse_ \old ->
-        removeEventListener (wrap k) (unwrap old) false e
-      addEventListener (wrap k) new false e
+  updateAttr
+    :: String
+    -> MapChange (Atomic String) (Last String)
+    -> Effect Unit
+  updateAttr k (Add val) = Element.setAttribute k (unwrap val) root
+  updateAttr k Remove = Element.removeAttribute k root
+  updateAttr k (Update u) = for_ (unwrap u) \s ->
+    Element.setAttribute k s root
 
-    updateChildren
-      :: IArray (View (dom :: DOM | eff))
-      -> ArrayChange (View (dom :: DOM | eff)) (ViewChanges (dom :: DOM | eff))
-      -> Eff (dom :: DOM | eff) (IArray (View (dom :: DOM | eff)))
-    updateChildren kids ch@(InsertAt i vw) = do
-      doc <- window >>= document >>> map htmlDocumentToDocument
-      cs <- children e
-      mc <- item i cs
-      newNode <- documentFragmentToNode <$> createDocumentFragment doc
-      render newNode vw
-      _ <- case mc of
-        Just c -> insertBefore newNode c e
-        Nothing -> appendChild newNode e
-      pure (patch kids [ch])
-    updateChildren kids ch@(DeleteAt i) = do
-      cs <- children e
-      mc <- item i cs
-      case mc of
-        Just c -> void (removeChild c e)
-        Nothing -> pure unit
-      pure (patch kids [ch])
-    updateChildren kids ch@(ModifyAt i dv) = do
-      cs <- children e
-      mc <- item i cs
-      mc # traverse_ \c ->
-        unwrap kids !! i # traverse_ \cv ->
-          applyPatch c cv dv
-      pure (patch kids [ch])
+  updateHandler
+    :: String
+    -> MapChange (Atomic (Effect EventListener)) (Last (Effect EventListener))
+    -> Effect Unit
+  updateHandler k (Add mh) = do
+    h <- unwrap mh
+    addEventListener (wrap k) h false (Element.toEventTarget root)
+    runEffectFn3 objUpsert k h listeners
+  updateHandler k Remove = do
+    ls <- Ref.read listeners
+    case Object.lookup k ls of
+      Nothing -> unsafeCrashWith $
+        "Purview lost track of a " <> show k <> " EventListener during a remove"
+      Just h -> do
+        removeEventListener (wrap k) h false (Element.toEventTarget root)
+        runEffectFn2 objDelete k listeners
+  updateHandler k (Update dh) = do
+    case unwrap dh of
+      Nothing -> pure unit
+      Just mh -> do
+        ls <- Ref.read listeners
+        case Object.lookup k ls of
+          Nothing -> unsafeCrashWith $ "Purview lost track of a " <> show k
+            <> "EventListener during an update"
+          Just h -> do
+            h' <- mh
+            removeEventListener (wrap k) h false (Element.toEventTarget root)
+            addEventListener (wrap k) h' false (Element.toEventTarget root)
+            runEffectFn3 objUpsert k h' listeners
+
+  updateChildren
+    :: ArrayChange View ViewChanges
+    -> Effect Unit
+  updateChildren (InsertAt i vw) = do
+    Tuple ele patcher <- render vw
+    mn <- Node.childNodes (Element.toNode root) >>= NodeList.item i
+    case mn of
+      Nothing ->
+        Node.appendChild (Element.toNode ele) (Element.toNode root) $> unit
+      Just n ->
+        Node.insertBefore (Element.toNode ele) n (Element.toNode root) $> unit
+    ps <- Ref.read patchers
+    case Array.insertAt i patcher ps of
+      Nothing -> Ref.write (Array.snoc ps patcher) patchers
+      Just patchers' -> Ref.write patchers' patchers
+  updateChildren (DeleteAt i) = do
+    mc <- Node.childNodes (Element.toNode root) >>= NodeList.item i
+    case mc of
+      Nothing -> unsafeCrashWith $
+        "Purview lost track of child #" <> show i <> " during a delete"
+      Just c -> do
+        _ <- Node.removeChild c (Element.toNode root)
+        ps <- Ref.read patchers
+        case Array.deleteAt i ps of
+          Nothing -> unsafeCrashWith $
+            "Purview lost track of the patcher for child #" <> show i
+            <> " during a delete"
+          Just patchers' -> Ref.write patchers' patchers
+  updateChildren (ModifyAt i dv) = do
+    mc <- Node.childNodes (Element.toNode root) >>= NodeList.item i
+    case mc of
+      Nothing -> unsafeCrashWith $
+        "Purview lost track of child #" <> show i <> " during a modify"
+      Just c -> do
+        ps <- Ref.read patchers
+        case Array.index ps i of
+          Nothing -> unsafeCrashWith $
+            "Purview lost track of the patcher for child #" <> show i
+            <> " during a modify"
+          Just patcher -> patcher dv
 
 -- | An example component type, used by the `run` function.
 -- |
 -- | A component takes a changing update function, and a changing `model`
 -- | and returns a changing `View`. The update function receives a `Change` to
 -- | the model and applies it.
-type Component model eff
-   = Jet (Atomic (Change model -> Eff eff Unit))
+type Component model
+   = Jet (Atomic (Change model -> Effect Unit))
   -> Jet model
-  -> Jet (View eff)
+  -> Jet View
 
--- | An example implementation of an application loop.
--- |
--- | Renders a `View` to the DOM under the given `Node`. The `View` can depend
--- | on the current value of the `model`, which can change over time by the
--- | application of `Change`s in event handlers.
+-- | Install and run a component as a child of the given node.
 run
-  :: forall model change eff
+  :: forall model change
    . Patch model change
-  => Element
-  -> Component model (dom :: DOM, ref :: REF | eff)
+  => Node
+  -> Component model
   -> model
-  -> Eff (dom :: DOM, ref :: REF | eff) Unit
-run root component initialModel = do
-  modelRef <- newRef initialModel
-  viewRef <- newRef Nothing
-  document <- window >>= document
-  let initialView = (component (constant (wrap onChange)) (constant initialModel)).position
-      onChange modelChange = do
-        currentModel <- readRef modelRef
-        currentView_ <- readRef viewRef
-        case currentView_ of
-          Nothing -> unsafeCrashWith "viewRef was empty"
-          Just currentView -> do
-            let newModel = patch currentModel (fromChange modelChange)
-                patches = updater currentModel modelChange
-                -- Compute and store the new view based on the patch we are about
-                -- to apply. This way, we can use the stored view to detach event
-                -- handlers correctly later, if necessary.
-                newView = patch currentView patches
-            writeRef modelRef newModel
-            writeRef viewRef (Just newView)
-            firstElementChild root >>= traverse_ \e ->
-              applyPatch e currentView patches
-      updater m dm = fromChange (component (constant (wrap onChange)) { position: m, velocity: dm }).velocity
-  writeRef viewRef (Just initialView)
-  render (toNode root) initialView
+  -> Effect Unit
+run parent component initialModel = do
+  modelRef <- Ref.new initialModel
+  patcherRef <- Ref.new (\_ -> unsafeCrashWith "Purview has no patcher to use")
+  let onChange modelChange = do
+        patcher <- Ref.read patcherRef
+        model <- Ref.read modelRef
+        Ref.write (patch model (fromChange modelChange)) modelRef
+        patcher (fromChange (component (constant (wrap onChange))
+          { position: model, velocity: modelChange }).velocity)
+  let initialView = component (constant (wrap onChange)) (constant initialModel)
+  Tuple root patcher <- render initialView.position
+  Ref.write patcher patcherRef
+  _ <- Node.appendChild (Element.toNode root) parent
+  pure unit
