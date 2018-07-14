@@ -12,13 +12,16 @@
     "url": "git://github.com/paf31/purescript-purview.git"
   },
   "dependencies": {
-    "purescript-dom-classy": "^2.2.0",
-    "purescript-incremental-functions": "^1.3.0",
-    "purescript-refs": "^3.0.0"
+    "purescript-incremental-functions": "C:\\Users\\Bryan\\Documents\\purescript\\purescript-incremental-functions",
+    "purescript-refs": "^4.1.0",
+    "purescript-web-dom": "^1.0.0",
+    "purescript-web-html": "^1.0.0",
+    "purescript-web-events": "^1.0.0",
+    "purescript-foreign-object": "^1.0.0"
   },
   "devDependencies": {
-    "purescript-console": "^3.0.0",
-    "purescript-psci-support": "^3.0.0",
-    "purescript-random": "^3.0.0"
+    "purescript-console": "^4.1.0",
+    "purescript-psci-support": "^4.0.0",
+    "purescript-random": "^4.0.0"
   }
 }
